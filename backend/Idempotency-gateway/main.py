@@ -10,6 +10,8 @@ app = FastAPI(title="Idempotency Gateway API")
 # In-memory store for idempotency
 # Structure: { idempotency_key: { "hash": str, "status": str, "response": dict, "status_code": int } }
 idempotency_store = {}
+# Locks to handle concurrent requests for the same key
+locks = {}
 
 class PaymentRequest(BaseModel):
     amount: float
@@ -18,6 +20,18 @@ class PaymentRequest(BaseModel):
 @app.get("/")
 async def root():
     return {"message": "API running"}
+
+@app.get("/payment-status/{idempotency_key}")
+async def get_payment_status(idempotency_key: str):
+    if idempotency_key not in idempotency_store:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    
+    stored_data = idempotency_store[idempotency_key]
+    
+    if stored_data["status"] == "IN_PROGRESS":
+        return {"status": "IN_PROGRESS"}
+    
+    return stored_data["response"]
 
 @app.post("/process-payment")
 async def process_payment(
@@ -32,47 +46,53 @@ async def process_payment(
     payload_str = json.dumps(payment.dict(), sort_keys=True)
     payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()
 
-    if idempotency_key in idempotency_store:
-        stored_data = idempotency_store[idempotency_key]
+    # Get or create a lock for this specific idempotency key
+    if idempotency_key not in locks:
+        locks[idempotency_key] = asyncio.Lock()
+    
+    async with locks[idempotency_key]:
+        # Check if we already have a record for this key
+        if idempotency_key in idempotency_store:
+            stored_data = idempotency_store[idempotency_key]
+            
+            # If hashes match, return stored response
+            if stored_data["hash"] == payload_hash:
+                if stored_data["status"] == "COMPLETED":
+                    response.headers["X-Cache-Hit"] = "true"
+                    response.status_code = stored_data["status_code"]
+                    return stored_data["response"]
+            else:
+                # If hashes don't match, it's a conflict
+                raise HTTPException(
+                    status_code=409,
+                    detail="Idempotency key already used for a different request body."
+                )
         
-        # If hashes match, return stored response
-        if stored_data["hash"] == payload_hash:
-            # If still processing, we might want to wait, but the task says "return stored response"
-            # Assuming it's already COMPLETED for this task logic
-            if stored_data["status"] == "COMPLETED":
-                response.headers["X-Cache-Hit"] = "true"
-                response.status_code = stored_data["status_code"]
-                return stored_data["response"]
-        else:
-            # If hashes don't match, it's a conflict
-            raise HTTPException(
-                status_code=409,
-                detail="Idempotency key already used for a different request body."
-            )
-    
-    # If key doesn't exist or hash is different (different hash logic to be refined in next task)
-    # For now, let's proceed with new entry or overwrite if it's a new request with same key (to be fixed)
-    
-    # Mark as IN_PROGRESS
-    idempotency_store[idempotency_key] = {
-        "hash": payload_hash,
-        "status": "IN_PROGRESS",
-        "response": None,
-        "status_code": None
-    }
+        # If we reached here, it's a new request (not in store) or 
+        # it was a concurrent request that just finished waiting for the lock.
+        # But wait, if it was concurrent and just finished, the 'if idempotency_key in idempotency_store' 
+        # above would have caught it and returned. So this part is only for the first execution.
 
-    # Simulate 2 second delay
-    await asyncio.sleep(2)
+        # Mark as IN_PROGRESS
+        idempotency_store[idempotency_key] = {
+            "hash": payload_hash,
+            "status": "IN_PROGRESS",
+            "response": None,
+            "status_code": None
+        }
 
-    # Process payment (Dummy logic)
-    response_body = {"message": f"Charged {payment.amount} {payment.currency}"}
-    status_code = 200
+        # Simulate 2 second delay (representing heavy processing)
+        await asyncio.sleep(2)
 
-    # Update store with COMPLETED status
-    idempotency_store[idempotency_key].update({
-        "status": "COMPLETED",
-        "response": response_body,
-        "status_code": status_code
-    })
+        # Process payment (Dummy logic)
+        response_body = {"message": f"Charged {payment.amount} {payment.currency}"}
+        status_code = 200
 
-    return response_body
+        # Update store with COMPLETED status
+        idempotency_store[idempotency_key].update({
+            "status": "COMPLETED",
+            "response": response_body,
+            "status_code": status_code
+        })
+
+        return response_body
