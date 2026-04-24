@@ -1,155 +1,90 @@
-# Idempotency-Gateway (The "Pay-Once" Protocol)
+# Idempotency Gateway API
 
-This challenge is designed to test your ability to bridge Computer Science fundamentals with Modern Backend Engineering.
+A high-performance middleware service designed to ensure that payment requests are processed **exactly once**, preventing double-charging during network retries or concurrent attempts.
 
-## 1. Business Context
+## 1. Architecture Overview
 
-> **Client:** _FinSafe Transactions Ltd._ (A fast-growing Payment Processor).
+<img src="assets/architecture_diagram.jpg" alt="Architecture Diagram" width="600">
 
-### The Problem
+The Idempotency Gateway operates as a protective layer between the client and the payment processing logic. It ensures that every unique request is handled exactly once, even in the event of retries or concurrent submissions.
 
-FinSafe's clients (e-commerce shops) occasionally experience network timeouts. When this happens, their servers automatically retry sending payment requests. Recently, this has led to a critical issue: **Double Charging**.
+### How it Works:
 
-If a customer clicks "Pay," the request is sent, but the network lags. The client retries the request. FinSafe processes _both_ requests, charging the customer twice. This is causing customer churn and regulatory headaches.
+1.  **Unique Identification**: Every request must include a `Idempotency-Key` in the header. This key uniquely identifies the transaction attempt from the client's perspective.
+2.  **Payload Integrity (Hashing)**: The gateway computes a SHA256 hash of the request body. If a key is reused with a different body, the gateway detects this mismatch and returns a `409 Conflict`, preventing accidental data corruption.
+3.  **Concurrency Control (Locking)**: To prevent "race conditions" where two identical requests arrive at the exact same millisecond, the gateway uses a locking mechanism. The first request to arrive acquires a lock for that specific key; subsequent requests for the same key will wait until the first one is finished.
+4.  **State Management**:
+    *   **IN_PROGRESS**: While the payment is being processed, the status is marked as "In Progress".
+    *   **COMPLETED**: Once processing is done, the response is cached, and the status is updated to "Completed".
+5.  **Fast Retrieval**: If a request with a known key and matching hash arrives, the gateway immediately returns the cached response from its store, bypassing the processing logic and ensuring the client receives a consistent result without double-charging.
 
-### The Solution
+## 2. Setup Instructions
 
-FinSafe needs you to build an **Idempotency Layer**. This is a middleware service (or API) that ensures no matter how many times a client sends the same request, the payment is processed **exactly once**.
+### Prerequisites
+- Python 3.10+
 
----
+### Installation
+1. Navigate to the project directory:
+   ```bash
+   cd backend/Idempotency-gateway/
+   ```
 
-## 2. Technical Objective
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Build a RESTful API that mimics a payment processing backend. It must check for a unique `Idempotency-Key` in the HTTP headers.
+3. Run the application:
+   ```bash
+   uvicorn main:app --reload
+   ```
 
-- **First Request:** Process the payment and save the response.
-- **Duplicate Request:** Detect the existing key and return the _saved_ response immediately, without processing the payment again.
+4. **Run all tests at once**:
+   You can easily verify the entire system by running all tests at the same time with this command:
+   ```bash
+   pytest
+   ```
 
----
+## 3. API Documentation
 
-## 3. Getting Started
+### POST `/process-payment`
+Processes a payment transaction with idempotency protection.
 
-1.  **Fork this Repository:** Do not clone it directly. Create a fork to your own GitHub account.
-2.  **Environment:** You may use **Node.js, Python, Java or Go, etc.**. You may use any database or in-memory store (Redis, SQLite, or a simple native Map/Dictionary variable).
-3.  **Submission:** Your final submission will be a link to your forked repository containing the source code and documentation.
+**Headers:**
+- `Idempotency-Key` (Required): A unique string identifying the request.
 
----
+**Request Body:**
+```json
+{
+  "amount": 100.0,
+  "currency": "GHS"
+}
+```
 
-## 4. The Architecture Diagram
-
-**Task:** Before you write any code, you must design the logic flow.
-**Deliverable:** A **Sequence Diagram** or **Flowchart** included in your README.
-
----
-
-## 5. User Stories & Acceptance Criteria
-
-### User Story 1: The First Transaction (Happy Path)
-
-**As a** client system (e.g., an online store),
-**I want to** send a payment request with a unique ID,
-**So that** my transaction is processed successfully.
-
-**Acceptance Criteria:**
-
-- [ ] The API accepts a `POST` request to endpoint `/process-payment`.
-- [ ] The request header must contain `Idempotency-Key: <some-unique-string>`.
-- [ ] The request body accepts a JSON object (e.g., `{"amount": 100, "currency": "GHS"}`).
-- [ ] The server simulates processing (e.g., a 2-second delay) and returns a `200 OK` or `201 Created` response.
-- [ ] The response body should include a status message: `"Charged 100 GHS"`.
-
-### User Story 2: The Duplicate Attempt (Idempotency Logic)
-
-**As a** client system,
-**I want to** safely retry a request if I don't hear back,
-**So that** I don't accidentally double-charge the user.
-
-**Acceptance Criteria:**
-
-- [ ] If the client sends a second `POST` request with the **same** `Idempotency-Key` and payload:
-  - [ ] The server must **NOT** run the processing logic again (no 2-second delay).
-  - [ ] The server must return the **exact same** response body and status code as the first successful request.
-  - [ ] The server returns a header `X-Cache-Hit: true` to indicate this was a replayed response.
-
-### User Story 3: Different Request, Same Key (Fraud/Error Check)
-
-**As a** security officer,
-**I want to** reject requests that reuse keys for different payments,
-**So that** we maintain data integrity.
-
-**Acceptance Criteria:**
-
-- [ ] If a request arrives with an existing `Idempotency-Key` but a **different** request body (e.g., changing amount from 100 to 500):
-  - [ ] The server must return a `422 Unprocessable Entity` or `409 Conflict` error.
-  - [ ] The error message should state: `"Idempotency key already used for a different request body."`
+**Responses:**
+- `200 OK`: Payment processed successfully or returned from cache.
+- `400 Bad Request`: Missing `Idempotency-Key` header.
+- `409 Conflict`: `Idempotency-Key` reused for a different request body.
 
 ---
 
-## 6. Bonus User Story (The "In-Flight" Check)
+### GET `/payment-status/{idempotency_key}`
+Checks the current status of a specific transaction.
 
-**As a** system architect,
-**I want to** handle cases where two identical requests arrive at the exact same time,
-**So that** we don't succumb to race conditions.
+**Responses:**
+- `200 OK`: Returns the stored response or `{"status": "IN_PROGRESS"}`.
+- `404 Not Found`: No record found for the provided key.
 
-**Scenario:** Request A arrives. While Request A is still "processing" (during the 2-second delay), Request B (same key) arrives.
+## 4. Design Decisions
 
-**Acceptance Criteria:**
+### Hashing (SHA256)
+We use SHA256 hashing on the request body to ensure data integrity. If a client reuses an `Idempotency-Key` but changes the payload (e.g., changing the amount), the system detects the hash mismatch and returns a `409 Conflict`. This prevents accidental or malicious reuse of keys for different transactions.
 
-- [ ] Request B should not start a new process.
-- [ ] Request B should not return `409 Conflict`.
-- [ ] Request B should wait (block) until Request A finishes, and then return the result of Request A.
+### Concurrency Locks (`asyncio.Lock`)
+To handle race conditions where identical requests arrive simultaneously, we implement a per-key locking mechanism using `asyncio.Lock`. Only the first request acquires the lock and starts processing. Subsequent requests wait for the lock to be released, then retrieve the cached result of the first request.
 
----
+### In-Memory Store
+The current implementation uses a native Python dictionary to store transaction states. This allows for extremely fast lookups. In a production environment, this would be replaced with a distributed store like Redis to support horizontal scaling.
 
-## 7. The "Developer's Choice" Challenge
-
-We believe great engineers are also product thinkers.
-
-**Task:** Identify **one** additional feature or safety mechanism that would make this system better for a real-world Fintech company.
-
-1.  **Implement it.**
-2.  **Document it:** Explain _why_ you added it in your README.
-
----
-
-## 8. Documentation Requirements
-
-Your final `README.md` must replace these instructions. It must cover:
-
-1.  **Architecture Diagram**
-2.  **Setup Instructions**
-3.  **API Documentation**
-4.  **Design Decisions**
-5.  **The Developer's Choice:** Description of the extra feature you added.
-
----
-
-Submit your repo link via the [online](https://forms.cloud.microsoft/e/bLyGT3byxx) form.
-
----
-
-## 🛑 Pre-Submission Checklist
-
-**WARNING:** Before you submit your solution, you **MUST** pass every item on this list.
-If you miss any of these critical steps, your submission will be **automatically rejected** and you will **NOT** be invited to an interview.
-
-### 1. 📂 Repository & Code
-
-- [ ] **Public Access:** Is your GitHub repository set to **Public**? (We cannot review private repos).
-- [ ] **Clean Code:** Did you remove unnecessary files (like `node_modules`, `.env` with real keys, or `.DS_Store`)?
-- [ ] **Run Check:** if we clone your repo and run `npm start` (or equivalent), does the server start immediately without crashing?
-
-### 2. 📄 Documentation (Crucial)
-
-- [ ] **Architecture Diagram:** Did you include a visual Diagram (Flowchart or Sequence Diagram) in the README?
-- [ ] **README Swap:** Did you **DELETE** the original instructions (the problem brief) from this file and replace it with your own documentation?
-- [ ] **API Docs:** Is there a clear list of Endpoints and Example Requests in the README?
-
-### 3. 🧹 Git Hygiene
-
-- [ ] **Commit History:** Does your repo have multiple commits with meaningful messages? (A single "Initial Commit" is a red flag).
-
----
-
-**Ready?**
-If you checked all the boxes above, submit your repository link in the application form. Good luck! 🚀
+## 5. Extra feature: Payment Status Endpoint
+The `/payment-status` endpoint lets you check if a payment is still being processed or if it is already finished. This is helpful because you can check the status at any time without having to send the payment again.
