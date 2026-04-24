@@ -43,6 +43,12 @@ async def process_payment(
                 response.headers["X-Cache-Hit"] = "true"
                 response.status_code = stored_data["status_code"]
                 return stored_data["response"]
+        else:
+            # If hashes don't match, it's a conflict
+            raise HTTPException(
+                status_code=409,
+                detail="Idempotency key already used for a different request body."
+            )
     
     # If key doesn't exist or hash is different (different hash logic to be refined in next task)
     # For now, let's proceed with new entry or overwrite if it's a new request with same key (to be fixed)
