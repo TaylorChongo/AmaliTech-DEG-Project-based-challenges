@@ -2,13 +2,13 @@
 
 Pulse-Check is a robust Python-based API built with FastAPI designed to monitor the health and connectivity of remote devices or services. It acts as a "Dead Man’s Switch," where devices must periodically send a "heartbeat" to prove they are still functional. If a heartbeat is missed beyond a configured timeout (plus a grace period), the system triggers an alert.
 
-## Architecture
+## I. Architecture
 
 The diagram below illustrates the complete lifecycle of a pulse monitor. It starts with the registration of a new device, which initializes an asynchronous timer. The flow shows how subsequent heartbeats reset this timer to maintain an `ACTIVE` status, how the `PAUSE` functionality can temporarily halt monitoring without triggering alerts, and finally, how the system automatically transitions a monitor to the `DOWN` state and logs an alert if the combined timeout and grace period expire without a heartbeat.
 
 <img src="assets/architecture.png" alt="Architecture Diagram" width="600">
 
-## Setup Instructions
+## II. Setup Instructions
 
 ### Prerequisites
 - Python 3.10+
@@ -30,7 +30,7 @@ uvicorn main:app --reload
 ```
 The API will be available at `http://127.0.0.1:8000`.
 
-## API Documentation
+## III. API Documentation
 
 ### 1. Register Monitor
 **POST** `/monitors`
@@ -72,13 +72,13 @@ The API will be available at `http://127.0.0.1:8000`.
   }
   ```
 
-## Design Decisions
+## IV. Design Decisions
 
 - **Asyncio:** Used for non-blocking concurrency. Each monitor runs its own lightweight `asyncio.create_task`, allowing the API to handle thousands of concurrent timers without the overhead of threads or processes.
 - **In-Memory Store:** A Python dictionary is used for rapid prototyping and low-latency access. It stores monitor metadata and references to active `asyncio` tasks.
 - **Timer Management:** Timers are managed by creating and cancelling `asyncio` tasks. When a heartbeat or pause request is received, the existing task is explicitly cancelled to prevent redundant alerts.
 
-## Developer’s Choice: Grace Period
+## V. Developer’s Choice: Grace Period
 
 ### What is it?
 A fixed 5-second buffer (`GRACE_PERIOD = 5`) added to every monitor's timeout.
@@ -89,7 +89,7 @@ In real-world networks, packets can be delayed due to jitter or temporary conges
 ### How it improves reliability?
 By waiting for `timeout + 5` seconds, we significantly reduce false-positive alerts, ensuring that the system only triggers when a device is truly unresponsive.
 
-## Testing
+## VI. Testing
 
 Run the automated test suite using `pytest`:
 ```bash
