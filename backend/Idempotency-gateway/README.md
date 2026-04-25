@@ -4,7 +4,9 @@ A high-performance middleware service designed to ensure that payment requests a
 
 ## 1. Architecture Overview
 
-<img src="assets/architecture_diagram.jpg" alt="Architecture Diagram" width="600">
+This diagram illustrates the sequence of operations within the Idempotency Gateway, showing how requests are hashed, locked, and cached to ensure exactly-once processing.
+
+<img src="assets/idempotency.png" alt="Idempotency Flow Diagram" width="600">
 
 The Idempotency Gateway operates as a protective layer between the client and the payment processing logic. It ensures that every unique request is handled exactly once, even in the event of retries or concurrent submissions.
 
