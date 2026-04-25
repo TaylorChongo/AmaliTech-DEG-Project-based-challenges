@@ -4,40 +4,9 @@ Pulse-Check is a robust Python-based API built with FastAPI designed to monitor 
 
 ## Architecture
 
-The following diagram illustrates the lifecycle of a monitor, including registration, heartbeat resets, the grace period, and the pause/resume functionality.
+The diagram below illustrates the complete lifecycle of a pulse monitor. It starts with the registration of a new device, which initializes an asynchronous timer. The flow shows how subsequent heartbeats reset this timer to maintain an `ACTIVE` status, how the `PAUSE` functionality can temporarily halt monitoring without triggering alerts, and finally, how the system automatically transitions a monitor to the `DOWN` state and logs an alert if the combined timeout and grace period expire without a heartbeat.
 
-```mermaid
-sequenceDiagram
-    participant Device
-    participant API
-    participant Timer
-    participant Logger
-
-    Device->>API: POST /monitors (id, timeout)
-    API->>Timer: Start Async Task (timeout + grace)
-    API-->>Device: 201 Created (ACTIVE)
-
-    Note over Device, Timer: Normal Operation
-    Device->>API: POST /monitors/{id}/heartbeat
-    API->>Timer: Cancel existing task
-    API->>Timer: Start new Task (timeout + grace)
-    API-->>Device: 200 OK
-
-    Note over Device, Timer: Pause Feature
-    Device->>API: POST /monitors/{id}/pause
-    API->>Timer: Cancel task
-    API-->>Device: 200 OK (PAUSED)
-
-    Note over Device, Timer: Resume via Heartbeat
-    Device->>API: POST /monitors/{id}/heartbeat
-    API->>Timer: Start new Task (timeout + grace)
-    API-->>Device: 200 OK (ACTIVE)
-
-    Note over Device, Timer: Timeout Scenario
-    Timer->>Timer: Wait (timeout + grace)
-    Timer->>API: Set status = DOWN
-    API->>Logger: Log Alert (Device Down!)
-```
+<img src="architecture.png" alt="Architecture Diagram" width="600">
 
 ## Setup Instructions
 
