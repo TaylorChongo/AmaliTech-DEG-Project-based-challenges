@@ -31,6 +31,9 @@ The Idempotency Gateway operates as a protective layer between the client and th
    cd backend/Idempotency-gateway/
    ```
 
+> [!IMPORTANT]
+> **You MUST install the dependencies before attempting to run the server.** Failure to do so will cause the application to crash.
+
 2. Install dependencies:
    ```bash
    pip install -r requirements.txt
