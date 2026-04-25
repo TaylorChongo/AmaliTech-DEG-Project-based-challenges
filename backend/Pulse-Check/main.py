@@ -67,8 +67,11 @@ async def heartbeat(id: str):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitor not found")
     
     monitor = monitors[id]
-    if monitor["status"] == "DOWN":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Monitor is already DOWN")
+    if monitor["status"] != "ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail=f"Heartbeat failed: Monitor is in {monitor['status']} state"
+        )
     
     # Cancel the existing timer task
     if monitor["task"]:
@@ -78,4 +81,4 @@ async def heartbeat(id: str):
     new_task = asyncio.create_task(monitor_timer(id, monitor["timeout"]))
     monitors[id]["task"] = new_task
     
-    return {"message": "Heartbeat received"}
+    return {"message": "Heartbeat received, timer reset"}
