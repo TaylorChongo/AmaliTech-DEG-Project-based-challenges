@@ -10,14 +10,16 @@ app = FastAPI()
 # In-memory storage for monitors
 monitors = {}
 
+GRACE_PERIOD = 5  # seconds
+
 class Monitor(BaseModel):
     id: str
     timeout: int
     alert_email: str
 
 async def monitor_timer(monitor_id: str, timeout: int):
-    """Asynchronous timer that waits for the timeout and triggers an alert."""
-    await asyncio.sleep(timeout)
+    """Asynchronous timer that waits for the timeout + grace period and triggers an alert."""
+    await asyncio.sleep(timeout + GRACE_PERIOD)
     if monitor_id in monitors:
         monitors[monitor_id]["status"] = "DOWN"
         alert = {
@@ -50,6 +52,7 @@ async def create_monitor(monitor: Monitor):
     
     monitors[monitor.id] = {
         "timeout": monitor.timeout,
+        "grace_period": GRACE_PERIOD,
         "status": "ACTIVE",
         "alert_email": monitor.alert_email,
         "task": task
