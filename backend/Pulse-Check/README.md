@@ -1,156 +1,125 @@
-# Pulse-Check-API ("Watchdog" Sentinel)
+# Pulse-Check (Dead Man’s Switch) API
 
-This challenge is designed to test your ability to bridge Computer Science fundamentals with Modern Backend Engineering.
+Pulse-Check is a robust Python-based API built with FastAPI designed to monitor the health and connectivity of remote devices or services. It acts as a "Dead Man’s Switch," where devices must periodically send a "heartbeat" to prove they are still functional. If a heartbeat is missed beyond a configured timeout (plus a grace period), the system triggers an alert.
 
-## 1. Business Context
+## Architecture
 
-> **Client:** _CritMon Servers Inc._ (A Critical Infrastructure Monitoring Company).
+The following diagram illustrates the lifecycle of a monitor, including registration, heartbeat resets, the grace period, and the pause/resume functionality.
 
-### The Problem
+```mermaid
+sequenceDiagram
+    participant Device
+    participant API
+    participant Timer
+    participant Logger
 
-CritMon provides monitoring for remote solar farms and unmanned weather stations in areas with poor connectivity. These devices are supposed to send "I'm alive" signals every hour.
+    Device->>API: POST /monitors (id, timeout)
+    API->>Timer: Start Async Task (timeout + grace)
+    API-->>Device: 201 Created (ACTIVE)
 
-Currently, CritMon has no way of knowing if a device has gone offline (due to power failure or theft) until a human manually checks the logs. They need a system that alerts _them_ when a device _stops_ talking.
+    Note over Device, Timer: Normal Operation
+    Device->>API: POST /monitors/{id}/heartbeat
+    API->>Timer: Cancel existing task
+    API->>Timer: Start new Task (timeout + grace)
+    API-->>Device: 200 OK
 
-### The Solution
+    Note over Device, Timer: Pause Feature
+    Device->>API: POST /monitors/{id}/pause
+    API->>Timer: Cancel task
+    API-->>Device: 200 OK (PAUSED)
 
-You need to build a **Dead Man’s Switch API**. Devices will register a "monitor" with a countdown timer (e.g., 60 seconds). If the device fails to "ping" (send a heartbeat) to the API before the timer runs out, the system automatically triggers an alert.
+    Note over Device, Timer: Resume via Heartbeat
+    Device->>API: POST /monitors/{id}/heartbeat
+    API->>Timer: Start new Task (timeout + grace)
+    API-->>Device: 200 OK (ACTIVE)
 
----
+    Note over Device, Timer: Timeout Scenario
+    Timer->>Timer: Wait (timeout + grace)
+    Timer->>API: Set status = DOWN
+    API->>Logger: Log Alert (Device Down!)
+```
 
-## 2. Technical Objective
+## Setup Instructions
 
-Build a backend service that manages stateful timers.
+### Prerequisites
+- Python 3.10+
 
-- **Registration:** Allow a client to create a monitor with a specific timeout duration.
-- **Heartbeat:** Reset the countdown when a ping is received.
-- **Trigger:** Fire a webhook (or log a critical error) if the countdown reaches zero.
+### Installation
+1. Clone the repository and navigate to the project directory.
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
----
+### Running the App
+Start the server using Uvicorn:
+```bash
+uvicorn main:app --reload
+```
+The API will be available at `http://127.0.0.1:8000`.
 
-## 3. Getting Started
+## API Documentation
 
-1.  **Fork this Repository:** Do not clone it directly. Create a fork to your own GitHub account.
-2.  **Environment:** You may use **Node.js, Python, Java or Go, etc.**.
-3.  **Submission:** Your final submission will be a link to your forked repository containing:
-    - The source code.
-    - The **Architecture Diagram**
-    - The `README.md` with documentation.
+### 1. Register Monitor
+**POST** `/monitors`
+- **Request Body:**
+  ```json
+  {
+    "id": "device-123",
+    "timeout": 60,
+    "alert_email": "admin@example.com"
+  }
+  ```
+- **Success Response (201 Created):**
+  ```json
+  {
+    "id": "device-123",
+    "timeout": 60,
+    "status": "ACTIVE",
+    "alert_email": "admin@example.com"
+  }
+  ```
 
----
+### 2. Send Heartbeat
+**POST** `/monitors/{id}/heartbeat`
+- **Description:** Resets the timer for an ACTIVE monitor or resumes a PAUSED monitor.
+- **Success Response (200 OK):**
+  ```json
+  {
+    "message": "Heartbeat received, monitoring active"
+  }
+  ```
 
-## 4. The Architecture Diagram
+### 3. Pause Monitor
+**POST** `/monitors/{id}/pause`
+- **Description:** Stops the timer completely. No alerts will fire until a heartbeat is received.
+- **Success Response (200 OK):**
+  ```json
+  {
+    "message": "Monitor paused"
+  }
+  ```
 
-**Task:** Before you write any code, you must design the logic flow.
-**Deliverable:** A **Sequence Diagram** or **State Flowchart** embedded in your `README.md`.
+## Design Decisions
 
----
+- **Asyncio:** Used for non-blocking concurrency. Each monitor runs its own lightweight `asyncio.create_task`, allowing the API to handle thousands of concurrent timers without the overhead of threads or processes.
+- **In-Memory Store:** A Python dictionary is used for rapid prototyping and low-latency access. It stores monitor metadata and references to active `asyncio` tasks.
+- **Timer Management:** Timers are managed by creating and cancelling `asyncio` tasks. When a heartbeat or pause request is received, the existing task is explicitly cancelled to prevent redundant alerts.
 
-## 5. User Stories & Acceptance Criteria
+## Developer’s Choice: Grace Period
 
-### User Story 1: Registering a Monitor
+### What is it?
+A fixed 5-second buffer (`GRACE_PERIOD = 5`) added to every monitor's timeout.
 
-**As a** device administrator,
-**I want to** create a new monitor for my device,
-**So that** the system knows to track its status.
+### Why it was added?
+In real-world networks, packets can be delayed due to jitter or temporary congestion. Without a grace period, a device that sends a heartbeat at exactly 60 seconds might be flagged as "DOWN" if the packet arrives at 60.1 seconds.
 
-**Acceptance Criteria:**
+### How it improves reliability?
+By waiting for `timeout + 5` seconds, we significantly reduce false-positive alerts, ensuring that the system only triggers when a device is truly unresponsive.
 
-- [ ] The API accepts a `POST /monitors` request.
-- [ ] Input: `{"id": "device-123", "timeout": 60, "alert_email": "admin@critmon.com"}`.
-- [ ] The system starts a countdown timer for 60 seconds associated with `device-123`.
-- [ ] Response: `201 Created` with a confirmation message.
+## Testing
 
-### User Story 2: The Heartbeat (Reset)
-
-**As a** remote device,
-**I want to** send a signal to the server,
-**So that** my timer is reset and no alert is sent.
-
-**Acceptance Criteria:**
-
-- [ ] The API accepts a `POST /monitors/{id}/heartbeat` request.
-- [ ] If the ID exists and the timer has NOT expired:
-  - [ ] Restart the countdown from the beginning (e.g., reset to 60 seconds).
-  - [ ] Return `200 OK`.
-- [ ] If the ID does not exist:
-  - [ ] Return `404 Not Found`.
-
-### User Story 3: The Alert (Failure State)
-
-**As a** support engineer,
-**I want to** be notified immediately if a device stops sending heartbeats,
-**So that** I can deploy a repair team.
-
-**Acceptance Criteria:**
-
-- [ ] If the timer for `device-123` reaches 0 seconds (no heartbeat received):
-  - [ ] The system must internally "fire" an alert.
-  - [ ] **Implementation:** For this project, simply `console.log` a JSON object: `{"ALERT": "Device device-123 is down!", "time": <timestamp>}`. (Or simulate sending an email).
-  - [ ] The monitor status changes to `down`.
-
----
-
-## 6. Bonus User Story (The "Snooze" Button)
-
-**As a** maintenance technician,
-**I want to** pause monitoring while I am repairing a device,
-**So that** I don't trigger false alarms.
-
-**Acceptance Criteria:**
-
-- [ ] Create a `POST /monitors/{id}/pause` endpoint.
-- [ ] When called, the timer stops completely. No alerts will fire.
-- [ ] Calling the heartbeat endpoint again automatically "un-pauses" the monitor and restarts the timer.
-
----
-
-## 7. The "Developer's Choice" Challenge
-
-We value engineers who look for "what's missing."
-
-**Task:** Identify **one** additional feature that makes this system more robust or user-friendly.
-
-1.  **Implement it.**
-2.  **Document it:** Explain _why_ you added it in your README.
-
----
-
-## 8. Documentation Requirements
-
-Your final `README.md` must replace these instructions. It must cover:
-
-1.  **Architecture Diagram**
-2.  **Setup Instructions**
-3.  **API Documentation**
-4.  **The Developer's Choice:** Explanation of your added feature.
-
----
-
-Submit your repo link via the [online](https://forms.cloud.microsoft/e/bLyGT3byxx) form.
-
-## 🛑 Pre-Submission Checklist
-
-**WARNING:** Before you submit your solution, you **MUST** pass every item on this list.
-If you miss any of these critical steps, your submission will be **automatically rejected** and you will **NOT** be invited to an interview.
-
-### 1. 📂 Repository & Code
-
-- [ ] **Public Access:** Is your GitHub repository set to **Public**? (We cannot review private repos).
-- [ ] **Clean Code:** Did you remove unnecessary files (like `node_modules`, `.env` with real keys, or `.DS_Store`)?
-- [ ] **Run Check:** if we clone your repo and run `npm start` (or equivalent), does the server start immediately without crashing?
-
-### 2. 📄 Documentation (Crucial)
-
-- [ ] **Architecture Diagram:** Did you include a visual Diagram (Flowchart or Sequence Diagram) in the README?
-- [ ] **README Swap:** Did you **DELETE** the original instructions (the problem brief) from this file and replace it with your own documentation?
-- [ ] **API Docs:** Is there a clear list of Endpoints and Example Requests in the README?
-
-### 3. 🧹 Git Hygiene
-
-- [ ] **Commit History:** Does your repo have multiple commits with meaningful messages? (A single "Initial Commit" is a red flag).
-
----
-
-**Ready?**
-If you checked all the boxes above, submit your repository link in the application form. Good luck! 🚀
+Run the automated test suite using `pytest`:
+```bash
+pytest test_main.py
+```
