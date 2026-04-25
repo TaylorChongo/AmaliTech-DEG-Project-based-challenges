@@ -6,7 +6,7 @@ Pulse-Check is a robust Python-based API built with FastAPI designed to monitor 
 
 The diagram below illustrates the complete lifecycle of a pulse monitor. It starts with the registration of a new device, which initializes an asynchronous timer. The flow shows how subsequent heartbeats reset this timer to maintain an `ACTIVE` status, how the `PAUSE` functionality can temporarily halt monitoring without triggering alerts, and finally, how the system automatically transitions a monitor to the `DOWN` state and logs an alert if the combined timeout and grace period expire without a heartbeat.
 
-<img src="architecture.png" alt="Architecture Diagram" width="600">
+<img src="assets/architecture.png" alt="Architecture Diagram" width="600">
 
 ## Setup Instructions
 
