@@ -60,3 +60,22 @@ async def create_monitor(monitor: Monitor):
         "status": "ACTIVE",
         "alert_email": monitor.alert_email
     }
+
+@app.post("/monitors/{id}/heartbeat")
+async def heartbeat(id: str):
+    if id not in monitors:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Monitor not found")
+    
+    monitor = monitors[id]
+    if monitor["status"] == "DOWN":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Monitor is already DOWN")
+    
+    # Cancel the existing timer task
+    if monitor["task"]:
+        monitor["task"].cancel()
+    
+    # Start a new timer task (reset)
+    new_task = asyncio.create_task(monitor_timer(id, monitor["timeout"]))
+    monitors[id]["task"] = new_task
+    
+    return {"message": "Heartbeat received"}
