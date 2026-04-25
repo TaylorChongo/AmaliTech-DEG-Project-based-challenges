@@ -20,6 +20,9 @@ The diagram below illustrates the complete lifecycle of a pulse monitor. It star
    pip install -r requirements.txt
    ```
 
+> [!IMPORTANT]
+> You **must** install the dependencies using the command above before attempting to run the server or tests.
+
 ### Running the App
 Start the server using Uvicorn:
 ```bash
